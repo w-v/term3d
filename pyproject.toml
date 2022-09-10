@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "term3d"
+version = "0.1.0"
+description = "a 3d renderer in the terminal"
+authors = ["wtv <wtv@protonmail.ch>"]
+license = "WTFPL"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "3.10.1"
+numpy = "^1.23.2"
+scipy = "^1.9.1"
+pynimation = "2.0"
+
+[[tool.poetry.source]]
+name = "inria"
+url = "https://gitlab.inria.fr/api/v4/projects/18034/packages/pypi/simple"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
