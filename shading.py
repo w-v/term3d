@@ -41,11 +41,33 @@ def gen_cube():
         .reshape((-1, 3))
     )
     cube = cube.reshape((-1, 3))
+    uniq = np.unique(cube, axis=0, return_index=True)[1]
+    cube = cube[uniq]
+    normals = normals[uniq]
     cube -= np.array([0.5, 0.5, 0.5])
     return [cube, normals]
 
 
-def render(obj, a):
+def render_cube():
+    obj = gen_cube()
+    # obj = gen_sins()
+    a = 0
+    # pos = np.array([0, -10, 40])
+    pos = np.array([0, 0, 2])
+    light_dir = np.array([0, -1, 1]) * -1
+    light_dir = light_dir / np.linalg.norm(light_dir)
+    while True:
+        t = time.time()
+        a += 0.2
+        rot = Rotation.from_euler(
+            "xyz", [45 + 2 * a, 45 + a, 0], degrees=True
+        ).as_matrix()
+        # obj = gen_sins(a)
+        render(obj, rot, pos, light_dir)
+        print("%.2f fps" % (1 / (time.time() - t)))
+
+
+def render(obj, rot, pos, light_dir):
     def getch(x, y):
         pass
 
@@ -54,10 +76,6 @@ def render(obj, a):
     H = 40
     points, normals = obj
     # rot = np.identity(3)
-    rot = Rotation.from_euler(
-        "xyz", [45 + 2 * a, 45 + a, 0], degrees=True
-    ).as_matrix()
-    pos = np.array([0, 0, 1.5])
     points = np.einsum("...ij,...j", rot, points) + pos
     oz = 1 / points[:, 2]
     nverts = points[:, [0, 1]]
@@ -65,9 +83,16 @@ def render(obj, a):
     nverts[:, 1] = H / 2 - K * oz * nverts[:, 1] * 0.55
 
     coords = np.round(nverts).astype(int)
-
-    light_dir = np.array([0, -1, 1]) * -1
-    light_dir = light_dir / np.linalg.norm(light_dir)
+    clip = (
+        (coords[:, 0] < W)
+        & (coords[:, 1] < H)
+        & (coords[:, 0] > 0)
+        & (coords[:, 1] > 0)
+        & (oz > 0)
+    )
+    coords = coords[clip]
+    oz = oz[clip]
+    normals = normals[clip]
 
     normals = normals / np.linalg.norm(normals, axis=-1)[..., np.newaxis]
     normals = np.einsum("...ij,...j", rot, normals)
@@ -75,7 +100,9 @@ def render(obj, a):
     facing = lum >= -0.5
     coords = coords[facing]
     oz = oz[facing]
-    lum_id = np.clip(np.round(((lum + 0.5) / 1.5) * 11).astype(int), 0, 11)
+    lum_id = np.clip(
+        np.round(((lum[facing] + 0.5) / 1.5) * 11).astype(int), 0, 11
+    )
 
     target = np.full((W, H), -1, dtype=int)
     order = np.argsort(oz)
@@ -114,31 +141,191 @@ def render(obj, a):
         ]
         + ["_" * W]
     )
-    print("\x1b[H")
+    # print("\x1b[H")
     print(chars)
 
 
-def main():
-    # a = np.linspace(-1, 1, 10)
-    # b = np.vstack([a, a, np.zeros(10)]).swapaxes(0, 1)
-    # obj = [b, b]
+def gen_sins(c):
+    a, b = 4, 0.2
+    d, e = 80, 40
+    # n = 80
+    dd = np.linspace(-d, d, 3 * d)
+    ee = np.linspace(-e, e, 3 * e)
+    g = np.array(np.meshgrid(dd, ee)).swapaxes(0, 2)
+    gg = np.concatenate(
+        [
+            g[..., [0]],
+            a * np.sin(g[..., [0]] * b) * np.sin(g[..., [1]] * b + c),
+            g[..., [1]],
+        ],
+        axis=-1,
+    ).reshape(-1, 3)
+    n0 = np.empty(gg.shape)
+    n1 = np.empty(gg.shape)
 
-    # d = np.linspace(-1, 1, 10)
-    # g = np.array(np.meshgrid(d, d)).swapaxes(0, 2)
-    # g = np.concatenate([g, np.zeros((10, 10, 1))], axis=-1).reshape(-1, 3)
-    # n = np.full(g.shape, np.array([0, 0, -1]))
-    # obj = [g, n]
+    n0[:, 0] = 1
+    n0[:, 1] = a * b * np.cos(b * gg[:, 0]) * np.sin(b * gg[:, 2] + c)
+    n0[:, 2] = 0
 
-    # import pdb
+    n1[:, 0] = 0
+    n1[:, 1] = a * b * np.sin(b * gg[:, 0]) * np.cos(b * gg[:, 2] + c)
+    n1[:, 2] = 1
 
-    # pdb.set_trace()
-    obj = gen_cube()
+    n0 = n0 / np.linalg.norm(n0)
+    n1 = n1 / np.linalg.norm(n1)
+    n = np.cross(n1, n0)
+
+    return [gg, n]
+
+
+def render_sins():
     a = 0
+    pos = np.array([0, -10, 40])
+
+    light_dir = np.array([-0.6, -1, 1])
+    light_dir = light_dir / np.linalg.norm(light_dir)
+    light_dir *= -0.9
+
     while True:
         t = time.time()
-        a += 0.3
-        render(obj, a)
+        a += 0.05
+        rot = Rotation.from_euler("xyz", [-30, 0, 0], degrees=True).as_matrix()
+        obj = gen_sins(a)
+        render(obj, rot, pos, light_dir)
         print("%.2f fps" % (1 / (time.time() - t)))
+
+
+def interpolant(t):
+    return t * t * t * (t * (t * 6 - 15) + 10)
+
+
+def perlin_noise(
+    # shape, res, rng, tileable=(True, True), interpolant=interpolant
+    angles,
+    grid,
+    d,
+):
+    """Generate a 2D numpy array of perlin noise.
+    Args:
+        shape: The shape of the generated array (tuple of two ints).
+            This must be a multple of res.
+        res: The number of periods of noise to generate along each
+            axis (tuple of two ints). Note shape must be a multiple of
+            res.
+        tileable: If the noise should be tileable along each axis
+            (tuple of two bools). Defaults to (False, False).
+        interpolant: The interpolation function, defaults to
+            t*t*t*(t*(t*6 - 15) + 10).
+    Returns:
+        A numpy array of shape shape with the generated noise.
+    Raises:
+        ValueError: If shape is not a multiple of res.
+    """
+    gradients = np.dstack((np.cos(angles), np.sin(angles)))
+    # if tileable[0]:
+    #     gradients[-1, :] = gradients[0, :]
+    # if tileable[1]:
+    #     gradients[:, -1] = gradients[:, 0]
+
+    gradients = gradients.repeat(d[0], 0).repeat(d[1], 1)
+    g00 = gradients[: -d[0], : -d[1]]
+    g10 = gradients[d[0] :, : -d[1]]
+    g01 = gradients[: -d[0], d[1] :]
+    g11 = gradients[d[0] :, d[1] :]
+    # Ramps
+    n00 = np.sum(np.dstack((grid[:, :, 0], grid[:, :, 1])) * g00, 2)
+    n10 = np.sum(np.dstack((grid[:, :, 0] - 1, grid[:, :, 1])) * g10, 2)
+    n01 = np.sum(np.dstack((grid[:, :, 0], grid[:, :, 1] - 1)) * g01, 2)
+    n11 = np.sum(np.dstack((grid[:, :, 0] - 1, grid[:, :, 1] - 1)) * g11, 2)
+    # Interpolation
+    t = interpolant(grid)
+    n0 = n00 * (1 - t[:, :, 0]) + t[:, :, 0] * n10
+    n1 = n01 * (1 - t[:, :, 0]) + t[:, :, 0] * n11
+    return np.sqrt(2) * ((1 - t[:, :, 1]) * n0 + t[:, :, 1] * n1)
+
+
+def render_noise2d():
+    W = 80
+    H = 50
+    RH = 40
+    F = 10
+    rng = np.random.default_rng()
+
+    shape = (H, W)
+    res = (H // F, W // F)
+    delta = (res[0] / shape[0], res[1] / shape[1])
+    d = (shape[0] // res[0], shape[1] // res[1])
+    grid = (
+        np.mgrid[0 : res[0] : delta[0], 0 : res[1] : delta[1]].transpose(
+            1, 2, 0
+        )
+        % 1
+    )
+    angles = 2 * np.pi * rng.random((res[0] + 1, res[1] + 1))
+    i = 0
+    while True:
+        # Gradients
+
+        if i % d[0] == 0:
+            angles = np.roll(angles, 1, axis=0)
+            angles[0] = 2 * np.pi * rng.random((res[1] + 1,))
+
+            greyscale = ".,-~:;=!*#$@"
+            noise = np.round(
+                ((perlin_noise(angles, grid, d) + 1) / 2)
+                * (len(greyscale) - 1)
+            ).astype(int)
+
+        noise = np.roll(noise, 1, axis=0)
+
+        chars = "|\n".join(
+            ["_" * W]
+            + [
+                "".join([greyscale[noise[j, i]] for i in range(W)])
+                for j in range(RH)
+            ]
+            + ["_" * W]
+        )
+        # print("\x1b[H")
+        print(chars)
+        i += 1
+        time.sleep(0.5)
+
+
+def render_noise3d():
+    W = 80
+    H = 40
+    F = 10
+
+    greyscale = ".,-~:;=!*#$@"
+    rng = np.random.default_rng()
+
+    shape = (H, W)
+    res = (H // F, W // F)
+    delta = (res[0] / shape[0], res[1] / shape[1])
+    d = (shape[0] // res[0], shape[1] // res[1])
+    grid = (
+        np.mgrid[0 : res[0] : delta[0], 0 : res[1] : delta[1]].transpose(
+            1, 2, 0
+        )
+        % 1
+    )
+    angles = 2 * np.pi * rng.random((res[0] + 1, res[1] + 1))
+
+    noise = np.round(
+        ((perlin_noise(angles, grid, d) + 1) / 2) * (len(greyscale) - 1)
+    ).astype(int)
+    np.mgrid[0:]
+    while True:
+        # Gradients
+        angles = np.roll(angles, 1, axis=0)
+        angles[0] = 2 * np.pi * rng.random((res[1] + 1,))
+
+
+def main():
+    # render_cube()
+    # render_sins()
+    render_noise2d()
 
 
 if __name__ == "__main__":
