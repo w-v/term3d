@@ -272,7 +272,7 @@ def render_noise2d():
 
             greyscale = ".,-~:;=!*#$@"
             noise = np.round(
-                ((perlin_noise(angles, grid, d) + 1) / 2)
+                ((perlin_noise(angles, grid, d)[0] + 1) / 2)
                 * (len(greyscale) - 1)
             ).astype(int)
 
@@ -282,7 +282,7 @@ def render_noise2d():
             ["_" * W]
             + [
                 "".join([greyscale[noise[j, i]] for i in range(W)])
-                for j in range(RH)
+                for j in range(H - RH, H)
             ]
             + ["_" * W]
         )
@@ -292,16 +292,52 @@ def render_noise2d():
         time.sleep(0.5)
 
 
-def render_noise3d():
-    W = 80
-    H = 40
-    F = 10
+def perlin_normals(noise):
+    dx_y = -np.hstack((noise[:, 1:], noise[:, [-1]])) + np.hstack(
+        (noise[:, [0]], noise[:, :-1])
+    )
+    dx = np.empty((*dx_y.shape, 3))
+    dx[..., 0] = 1
+    dx[..., 1] = dx_y
+    dx[..., 2] = 0
 
-    greyscale = ".,-~:;=!*#$@"
+    dz_y = -np.vstack((noise[1:, :], noise[[-1], :])) + np.vstack(
+        (noise[[0], :], noise[:-1, :])
+    )
+    dz = np.empty((*dz_y.shape, 3))
+    dz[..., 0] = 0
+    dz[..., 1] = dz_y
+    dz[..., 2] = 1
+    normals = -np.cross(dz, dx)
+    return normals
+
+
+def render_noise3d():
+    W = 60
+    H = 90
+    F = 30  # perlin resolution factor
+    S = 4  # spatial resolution
+    A = 15  # altitude
+
+    pos = np.array([0, -10, W])
+
+    light_dir = np.array([-0.6, -1, 1])
+    light_dir = light_dir / np.linalg.norm(light_dir)
+    # light_dir *= 0.9
+
+    rot = Rotation.from_euler("xyz", [-10, 0, 0], degrees=True).as_matrix()
+
     rng = np.random.default_rng()
 
-    shape = (H, W)
-    res = (H // F, W // F)
+    hh = np.linspace(-H, H, S * H)
+    ww = np.linspace(-W, W, S * W)
+    g = np.array(np.meshgrid(hh, ww)).swapaxes(0, 2)
+
+    PH = H * S
+    PW = W * S
+
+    shape = (PH, PW)
+    res = (PH // F, PW // F)
     delta = (res[0] / shape[0], res[1] / shape[1])
     d = (shape[0] // res[0], shape[1] // res[1])
     grid = (
@@ -312,20 +348,44 @@ def render_noise3d():
     )
     angles = 2 * np.pi * rng.random((res[0] + 1, res[1] + 1))
 
-    noise = np.round(
-        ((perlin_noise(angles, grid, d) + 1) / 2) * (len(greyscale) - 1)
-    ).astype(int)
-    np.mgrid[0:]
+    i = 0
     while True:
         # Gradients
-        angles = np.roll(angles, 1, axis=0)
-        angles[0] = 2 * np.pi * rng.random((res[1] + 1,))
+
+        t = time.time()
+
+        if i % d[0] == 0:
+            angles = np.roll(angles, -1, axis=1)
+            angles[0] = 2 * np.pi * rng.random((res[1] + 1,))
+
+            greyscale = ".,-~:;=!*#$@"
+            noise = ((perlin_noise(angles, grid, d) + 1) / 2) * A
+            points = np.dstack(
+                (g[..., [0]], noise[..., np.newaxis], g[..., [1]])
+            )
+            normals = perlin_normals(noise)
+
+        noise = np.roll(noise, -1, axis=1)
+        points = np.dstack((g[..., [0]], noise[..., np.newaxis], g[..., [1]]))
+        normals = np.roll(normals, -1, axis=1)
+
+        render(
+            (points[:, :-F].reshape(-1, 3), normals[:, :-F].reshape(-1, 3)),
+            rot,
+            pos,
+            light_dir,
+        )
+
+        i += 1
+        print("%.2f fps" % (1 / (time.time() - t)))
+        time.sleep(1 / 30)
 
 
 def main():
     # render_cube()
     # render_sins()
-    render_noise2d()
+    # render_noise2d()
+    render_noise3d()
 
 
 if __name__ == "__main__":
